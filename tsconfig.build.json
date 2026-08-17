@@ -1,0 +1,15 @@
+{
+  // Emit config: src/ -> lib/ (JS) + lib/types/ (declarations), the layout
+  // package.json main/exports/files reference.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "lib",
+    "declarationDir": "lib/types"
+  },
+  "include": ["src"]
+}

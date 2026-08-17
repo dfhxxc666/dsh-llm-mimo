@@ -1,0 +1,45 @@
+# llm-mimo: Xiaomi MiMo v2.5 adapter for DeepSeek Harness
+#
+# NOTE ON LOADING: DeepSeek Harness does not discover plugin manifests from a
+# package's own cordis.yml. A running `dsh` is composed from ordered layers:
+# the profile's `dsh.profile.bundles`, then the profile's cordis.patch.yml,
+# then the home-level one, then any `--patch` overlay. Each layer is a patch
+# list of rows (`- insert: [{id, name, config}, ...]`, or id-targeted
+# overrides).
+#
+# To use this adapter in a profile:
+#   1. install the package into the profile  (e.g. `pnpm add dsh-llm-mimo`)
+#   2. append the block below to the profile's cordis.patch.yml
+#
+# Configuration:
+#   Set MIMO_API_KEY in your environment or .env file (stored through the web
+#   Models page when running the web profile).
+#   Optionally set llm-mimo.baseURL to use a custom endpoint.
+#
+# Supported models (advisory catalog):
+#   - mimo-v2.5-pro (default)
+#   - mimo-v2.5
+#
+# Thinking mode:
+#   MiMo v2.5 uses the `reasoning_content` field for thinking chains, the
+#   same wire format as DeepSeek. This plugin translates the thinking chain
+#   into harness ReasoningBlock format and replays `reasoning_content` back
+#   on tool-call turns as MiMo requires.
+
+- insert:
+    - id: llm-mimo
+      name: 'dsh-llm-mimo'
+      config:
+        apiKeyEnv: MIMO_API_KEY
+        baseURL: https://api.xiaomimimo.com/v1
+        enableThinking: true
+        maxTokens: 256000
+        defaultContextWindow: 1000000
+        models:
+          - id: mimo-v2.5-pro
+            name: MiMo-V2.5-Pro
+            contextWindow: 1000000
+          - id: mimo-v2.5
+            name: MiMo-V2.5
+            contextWindow: 1000000
+        streamIdleTimeoutMs: 300000

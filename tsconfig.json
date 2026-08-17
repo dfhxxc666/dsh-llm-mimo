@@ -1,0 +1,29 @@
+{
+  // Standalone typecheck config, mirroring the DeepSeek Harness
+  // tsconfig.base.json compiler options (target es2024, bundler resolution,
+  // strict + rewriteRelativeImportExtensions). When this package lives inside
+  // the harness monorepo, replace this file with the repo-standard package
+  // tsconfig that extends ../../../tsconfig.base.json.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2024"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": false,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src", "tests", "examples"]
+}
