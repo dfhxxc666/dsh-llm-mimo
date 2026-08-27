@@ -153,8 +153,10 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
           toolBlocks.set(call.index, block)
           yield { type: 'block-start', index: block.index, blockType: 'tool-call' }
         }
-        if (call.id !== undefined) block.callId = call.id
-        if (call.function?.name !== undefined) block.name = call.function.name
+        // MiMo repeats the tool-call slot across deltas with id/name nulled
+        // on continuation chunks — never let a null overwrite a real value.
+        if (call.id != null) block.callId = call.id
+        if (call.function?.name != null) block.name = call.function.name
         const fragment = call.function?.arguments ?? ''
         block.text += fragment
         yield {

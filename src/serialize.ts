@@ -63,6 +63,24 @@ function toWireTool(tool: ToolSchema): WireTool {
   }
 }
 
+/**
+ * MiMo strictly requires `tool_calls[].function.arguments` to be valid JSON on
+ * replayed history (thinking mode multi-turn). Interrupted tool calls can leave
+ * truncated/invalid argument strings in the durable session log; replaying them
+ * as-is makes every later turn 400 (see MiMo error docs: "Invalid Format" /
+ * reasoning_content passback rules). Defensively downgrade to a valid empty
+ * object so the turn can proceed.
+ */
+function sanitizeArguments(args: string | undefined | null): string {
+  if (typeof args !== 'string' || args.length === 0) return '{}'
+  try {
+    JSON.parse(args)
+    return args
+  } catch {
+    return '{}'
+  }
+}
+
 /** Serialize one assistant message (text + reasoning + tool calls). */
 function serializeAssistant(message: Message): WireAssistantMessage {
   const text = flattenText(message.content)
@@ -75,7 +93,7 @@ function serializeAssistant(message: Message): WireAssistantMessage {
     .map(block => ({
       id: block.id,
       type: 'function' as const,
-      function: { name: block.name, arguments: block.arguments },
+      function: { name: block.name, arguments: sanitizeArguments(block.arguments) },
     }))
 
   return {
@@ -157,6 +175,13 @@ export function serializeRequest(options: GenerateOptions, defaults: RequestDefa
     ? false
     : defaults.enableThinking
 
+  // Structural extension for sampling params not yet declared on GenerateOptions.
+  const sampling = options as GenerateOptions & {
+    topP?: number
+    frequencyPenalty?: number
+    presencePenalty?: number
+  }
+
   return {
     model: options.model,
     messages,
@@ -170,5 +195,10 @@ export function serializeRequest(options: GenerateOptions, defaults: RequestDefa
     ...options.maxTokens !== undefined ? { max_completion_tokens: options.maxTokens } : {},
     // Stop sequences (MiMo caps at 4)
     ...options.stop !== undefined && options.stop.length > 0 ? { stop: options.stop.slice(0, 4) } : {},
+    // Sampling params supported by MiMo API. Harness GenerateOptions does not
+    // declare these fields yet, so read them through a structural extension.
+    ...sampling.topP !== undefined ? { top_p: sampling.topP } : {},
+    ...sampling.frequencyPenalty !== undefined ? { frequency_penalty: sampling.frequencyPenalty } : {},
+    ...sampling.presencePenalty !== undefined ? { presence_penalty: sampling.presencePenalty } : {},
   }
 }

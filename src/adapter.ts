@@ -89,8 +89,8 @@ export interface MiMoAdapterOptions {
 export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000
 /** Default combined request/response context capacity. */
 export const DEFAULT_CONTEXT_WINDOW = 1_000_000
-/** Default per-request output-token cap. */
-export const DEFAULT_MAX_TOKENS = 256_000
+/** Default per-request output-token cap (MiMo API hard limit is 131072). */
+export const DEFAULT_MAX_TOKENS = 131_072
 const STREAM_IDLE_TIMEOUT_CODE = 'LLM_STREAM_IDLE_TIMEOUT'
 
 function modelInfo(provider: string, model: MiMoCatalogModel): LlmModelInfo {
@@ -138,8 +138,24 @@ export function httpErrorCode(status: number, error?: WireError['error']): strin
  * MiMo adapter. One instance serves every model name it was registered under.
  */
 export class MiMoAdapter extends LlmAdapter {
+  /** Cached API key with short TTL to avoid repeated credential lookups. */
+  private _cachedKey?: string
+  private _cachedKeyAt?: number
+  private readonly _KEY_CACHE_TTL = 60_000 // 60 seconds
+
   constructor(private readonly config: MiMoAdapterOptions) {
     super()
+  }
+
+  /** Resolve the API key with a short-lived cache (60s TTL). */
+  private async _resolveApiKeyCached(connection: MiMoConnectionOptions): Promise<string> {
+    const now = Date.now()
+    if (this._cachedKey && now - (this._cachedKeyAt ?? 0) < this._KEY_CACHE_TTL) {
+      return this._cachedKey
+    }
+    this._cachedKey = await this.config.resolveApiKey(connection)
+    this._cachedKeyAt = now
+    return this._cachedKey
   }
 
   override providerInfo(provider: string): LlmProviderInfo {
@@ -181,15 +197,36 @@ export class MiMoAdapter extends LlmAdapter {
     })
   }
 
+  /**
+   * LlmRuntime.prepareCall hook (dsh-llm 0.1.1-rc.2+). Resolves the model
+   * and returns a stream bound to the caller's options. Implemented here so
+   * the adapter works against the newer runtime without upgrading the
+   * peerDependency chain (see env notes P21, solution B).
+   */
+  override prepareCall(
+    provider: string,
+    model: string,
+    _signal?: AbortSignal,
+  ): Promise<{ model: LlmResolvedModelInfo; stream: (options: GenerateOptions) => AsyncIterable<StreamChunk> }> {
+    return this.resolveModel(provider, model, _signal).then(resolved => ({
+      model: resolved,
+      stream: (options: GenerateOptions) => this.stream(options),
+    }))
+  }
+
   async * stream(options: GenerateOptions): AsyncIterable<StreamChunk> {
     const connection = this.config.options()
-    const apiKey = await this.config.resolveApiKey(connection)
+    const apiKey = await this._resolveApiKeyCached(connection)
     const userId = this.config.resolveUserId()
     const consumer = new AbortController()
     const upstream = options.signal === undefined
       ? consumer.signal
       : AbortSignal.any([options.signal, consumer.signal])
-    using watchdog = idleWatchdog(upstream, connection.streamIdleTimeoutMs, STREAM_IDLE_TIMEOUT_CODE)
+    // Give thinking mode more idle time since reasoning takes longer.
+    const idleTimeoutMs = options.reasoningEffort !== 'off'
+      ? Math.min(connection.streamIdleTimeoutMs * 1.5, 450_000)
+      : connection.streamIdleTimeoutMs
+    using watchdog = idleWatchdog(upstream, idleTimeoutMs, STREAM_IDLE_TIMEOUT_CODE)
     const iterator = this.request(
       options,
       watchdog.signal,
@@ -269,6 +306,7 @@ export class MiMoAdapter extends LlmAdapter {
         headers,
         body: payload,
         signal,
+        keepalive: true, // reuse TCP/TLS connection across requests
       })
     } catch (error: unknown) {
       if (signal.aborted) throw error
@@ -282,12 +320,17 @@ export class MiMoAdapter extends LlmAdapter {
     if (!response.ok) {
       let message = `MiMo API error (HTTP ${response.status})`
       let providerError: WireError['error']
-      try {
-        const parsed = await response.json() as WireError
-        providerError = parsed.error
-        if (providerError?.message) message = providerError.message
-      } catch {
-        // Swallow error-body parsing failures
+      // response.text() + JSON.parse is more robust than response.json():
+      // an empty body would make .json() throw and lose the error message.
+      const text = await response.text()
+      if (text) {
+        try {
+          const parsed = JSON.parse(text) as WireError
+          providerError = parsed.error
+          if (providerError?.message) message = providerError.message
+        } catch {
+          // Swallow error-body parsing failures
+        }
       }
       const delay = providerRetryAfterMs(response.headers.get('retry-after'))
       const id = requestId(response.headers)
