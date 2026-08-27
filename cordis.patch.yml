@@ -1,0 +1,20 @@
+# dsh-llm-mimo: Xiaomi MiMo v2.5 adapter for DeepSeek Harness LLM seam.
+# This cordis.patch.yml is automatically injected by `dsh plugin add`.
+# No manual editing of the profile's cordis.patch.yml is needed after installation.
+- insert:
+    - id: llm-mimo
+      name: 'dsh-llm-mimo'
+      config:
+        apiKeyEnv: MIMO_API_KEY
+        baseURL: https://api.xiaomimimo.com/v1
+        enableThinking: true
+        maxTokens: 131072
+        defaultContextWindow: 1000000
+        models:
+          - id: mimo-v2.5-pro
+            name: MiMo-V2.5-Pro
+            contextWindow: 1000000
+          - id: mimo-v2.5
+            name: MiMo-V2.5
+            contextWindow: 1000000
+        streamIdleTimeoutMs: 300000

@@ -42,6 +42,40 @@ Xiaomi MiMo v2.5 adapter for [DeepSeek Harness](https://github.com/deepseek-ai/d
 
 ## Installation
 
+### 一键安装（推荐）
+
+> dsh-llm-mimo 已声明 `dsh.bundle` manifest，可通过 `dsh plugin add` 一步安装，
+> 无需手动编辑 profile 的 `cordis.patch.yml`。
+
+```bash
+# 在 DSH 目录下执行（需要 MinGit 已装，P4）
+dsh plugin --profile web add github:dfhxxc666/dsh-llm-mimo --config.minimum-release-age=0
+```
+
+安装后 `cordis.patch.yml` 的 llm-mimo insert 块会自动注入 profile。
+
+> ⚠️ 安装过程会触发 `pnpm build`（tsc 产出 lib/），若报 `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`
+> 或 `allowBuilds` 拒绝，按提示把 pnpm 打印的版本化密钥加入 `allowBuilds`（P6）再重装。
+
+#### API Key 配置（必须）
+
+安装后在 `~/.dsh/.credentials.yaml` 中添加：
+
+```yaml
+MIMO_API_KEY: sk-你的密钥
+```
+
+获取：[MiMo Platform](https://platform.xiaomimimo.com)
+
+然后重启 dsh web：
+
+```bash
+# 用户手动执行（agent 不得代跑，红线 P8/P23）
+powershell -ExecutionPolicy Bypass -File D:\DeepSeek\restart-dsh.ps1 -Force
+```
+
+GUI 模型选择器选 **Xiaomi MiMo → MiMo-V2.5-Pro** 即可。
+
 ### 通过 DSH AI 会话安装（推荐给本机重装 / 换机）
 
 dsh-llm-mimo 是**非 bundle 型插件**，不能 `dsh plugin add` 一步装好，且有多处易踩的坑
