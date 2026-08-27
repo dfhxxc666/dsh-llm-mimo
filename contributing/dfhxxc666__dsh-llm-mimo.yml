@@ -1,0 +1,7 @@
+url: https://github.com/dfhxxc666/dsh-llm-mimo
+name: dfhxxc666/dsh-llm-mimo
+category: model
+description:
+  en: "Xiaomi MiMo v2.5 adapter for DeepSeek Harness with thinking chain, tool calling, and OpenAI-compatible streaming. Fixes 400 errors from invalid tool_args JSON in session history."
+  zh: "小米 MiMo v2.5 适配 DeepSeek Harness 的 LLM 插件，支持思考链、工具调用与流式输出，修复了会话历史工具参数截断导致的 400 错误。"
+tarball: https://github.com/dfhxxc666/dsh-llm-mimo/releases/latest/download/dsh-llm-mimo.tgz
