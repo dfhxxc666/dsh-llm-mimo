@@ -141,6 +141,57 @@ restart-dsh.ps1        # 或 dsh web
 
 重启后在 GUI 模型选择器中选择 **Xiaomi MiMo → MiMo-V2.5-Pro**（或 MiMo-V2.5）即可。
 
+## 通过 DSH AI 会话安装（推荐给本机重装 / 换机）
+
+dsh-llm-mimo 是**非 bundle 型插件**，不能 `dsh plugin add` 一步装好，且有多处易踩的坑
+（link 源、源码目录自装依赖、cordis.patch.yml insert 激活、密钥入库、agent 不得代跑重启）。
+**最省事的做法是把下面整段指令粘贴给 DSH 的 AI 会话（agent），让它自动执行安装**：
+
+````text
+请安装 dsh-llm-mimo（来源：github:dfhxxc666/dsh-llm-mimo），严格按本机环境笔记
+DSH-ENV-NOTES.md 的 P16/P17/P19/P20/P21/P28/P29/P30 执行，步骤：
+
+1. clone 到源码目录：git clone https://github.com/dfhxxc666/dsh-llm-mimo.git ~/.dsh/dsh-llm-mimo
+2. 在源码目录内（必须）：pnpm install --config.minimum-release-age=0 && pnpm build
+   —— 产出 lib/（lib/ 被 .gitignore 排除，clone 后必须 build，P16/P19）
+3. profile（~/.dsh/profiles/web）的 package.json dependencies 改为：
+   "dsh-llm-mimo": "link:C:/Users/<YOU>/.dsh/dsh-llm-mimo"
+   —— 用 link 源防重装覆盖修复（P17/P28），勿用 github: 源
+4. profile 的 cordis.patch.yml 追加 llm-mimo insert 块：
+   - insert:
+       - id: llm-mimo
+         name: 'dsh-llm-mimo'
+         config:
+           apiKeyEnv: MIMO_API_KEY
+           baseURL: https://api.xiaomimimo.com/v1
+           enableThinking: true
+           maxTokens: 131072
+           defaultContextWindow: 1000000
+           models:
+             - id: mimo-v2.5-pro
+               name: MiMo-V2.5-Pro
+               contextWindow: 1000000
+             - id: mimo-v2.5
+               name: MiMo-V2.5
+               contextWindow: 1000000
+           streamIdleTimeoutMs: 300000
+   —— 非 bundle 型插件只能靠 insert 块激活（P20/P28），勿加 dsh.profile.bundles
+5. 在 profile 目录执行：pnpm install --config.minimum-release-age=0（重链 node_modules 为 SymbolicLink）
+6. API Key：把 MIMO_API_KEY 写入 ~/.dsh/.credentials.yaml（sk-... 密钥绝不进 git/README）
+7. 验证：
+   - dsh --profile web --dump-config | grep -A 3 llm-mimo（配置树含 llm-mimo）
+   - grep -c sanitizeArguments ~/.dsh/dsh-llm-mimo/lib/serialize.js（>=1，P29 核心修复在）
+8. 重启 dsh web —— 由用户手动执行（agent 不得代跑，红线 P8/P14/P23），
+   提供命令：powershell -ExecutionPolicy Bypass -File D:\DeepSeek\restart-dsh.ps1 -Force
+9. 重启后 GUI 新建会话选 Xiaomi MiMo → MiMo-V2.5-Pro 发消息验证。
+10. 同步检测：git -C ~/.dsh/dsh-llm-mimo fetch origin && git -C ~/.dsh/dsh-llm-mimo fetch dfhxxc666
+    && git rev-list --count main..origin/main（>0 说明上游 GuanxuJi 有更新，按 P30 判断是否同步，
+    同步后必须重跑 pnpm build 且确认 sanitizeArguments 仍在，勿丢本地修复）
+````
+
+> 说明：以上指令把"哪些是坑、为什么这么做"都写进去了，agent 执行时不需要额外猜。
+> 环境笔记（DSH-ENV-NOTES.md P30）已收录本流程的完整版，含上游更新检测与冲突判断策略。
+
 ## Verification
 
 ```bash
