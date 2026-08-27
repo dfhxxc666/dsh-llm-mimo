@@ -2,6 +2,12 @@
 
 Xiaomi MiMo v2.5 adapter for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) LLM seam.
 
+> **Fork 说明**：本仓库 fork 自 [GuanxuJi/dsh-llm-mimo](https://github.com/GuanxuJi/dsh-llm-mimo)，
+> 在原作者基础上修复了若干会导致 `MiMo API error (HTTP 400) INVALID_REQUEST` 的缺陷，并适配了
+> DeepSeek Harness 新版 LLM seam（dsh-llm 0.1.1-rc.2）。修改清单见下文 [Changes from upstream](#changes-from-upstream)。
+>
+> 本插件由 **AI 辅助适配与维护**（AI-assisted fork）：问题定位、代码修复、测试验证均经 AI 会话完成。
+
 ## Features
 
 - **Thinking chain support**: Correctly recognizes MiMo's `reasoning_content` field and translates it into harness `ReasoningBlock` format
@@ -17,33 +23,61 @@ Xiaomi MiMo v2.5 adapter for [DeepSeek Harness](https://github.com/deepseek-ai/d
 | `mimo-v2.5-pro` | MiMo-V2.5-Pro — flagship model for complex reasoning tasks |
 | `mimo-v2.5` | MiMo-V2.5 — general-purpose model |
 
+## Changes from upstream
+
+本 fork 相对原仓库 `GuanxuJi/dsh-llm-mimo` 的修改（全部已提交并验证）：
+
+| # | 修改 | 文件 | 说明 |
+|---|------|------|------|
+| 1 | **`sanitizeArguments` — 工具参数防御性校验** | `src/serialize.ts` | **核心修复**：MiMo 严格校验历史 assistant 消息 `tool_calls[].function.arguments` 必须是合法 JSON。工具调用被中断时，会话历史会固化截断/无效的 arguments（如 `{"profileName": "Default", "tabId": ` 只有 36 字符），任何后续请求回放这段历史都会触发 `400 INVALID_REQUEST`。现在非法 JSON 自动降级为 `{}`，会话可正常继续。 |
+| 2 | **`DEFAULT_MAX_TOKENS` 修正为 131072** | `src/adapter.ts` | MiMo API 硬上限为 131072，原值 256000 会导致 400。 |
+| 3 | **`prepareCall` 实现** | `src/adapter.ts` | 适配 dsh-llm 0.1.1-rc.2 的 LlmRuntime hook（否则报 `registration.adapter.prepareCall is not a function`）。 |
+| 4 | **API Key 60s 缓存** | `src/adapter.ts` | 避免每次请求都走凭据解析，降低延迟。 |
+| 5 | **fetch `keepalive`** | `src/adapter.ts` | 复用 TCP/TLS 连接，减少握手开销。 |
+| 6 | **思考模式动态超时** | `src/adapter.ts` | thinking on 时流空闲超时放宽到 1.5×（上限 450s）。 |
+| 7 | **错误响应体健壮解析** | `src/adapter.ts` | `response.text()` + `JSON.parse`，空响应体不再抛异常。 |
+| 8 | **依赖升级** | `package.json` | peer/dev `@deepseek-ai/dsh-llm` → `^0.1.1-rc.2`；新增 `dsh-brand` / `dsh-attachment` / `dsh-invariants` 精确版本 `0.1.1-rc.2`（无范围匹配，必须精确）。 |
+| 9 | **采样参数透传** | `src/serialize.ts` | `top_p` / `frequency_penalty` / `presence_penalty` 传给 MiMo API。 |
+| 10 | **tool-call null 覆盖 bug 修复** | `src/translate.ts` | 流式 tool-call 后续 chunk 将 `id`/`name` 置 null 时不再覆盖首个 chunk 的真实值。 |
+
 ## Installation
 
-### Build
-
-The package follows the harness package layout: `pnpm build` emits `lib/` (JS)
-plus `lib/types/` (declarations), which `main`/`exports`/`files` reference.
+### 1. Clone + build（推荐，保证本地修复不被覆盖）
 
 ```bash
-pnpm install
-pnpm build
-pnpm test        # vitest
-pnpm typecheck
+git clone https://github.com/dfhxxc666/dsh-llm-mimo.git ~/.dsh/dsh-llm-mimo
+cd ~/.dsh/dsh-llm-mimo
+pnpm install --config.minimum-release-age=0
+pnpm build          # tsc 产出 lib/
 ```
 
-### As a plugin in a DeepSeek Harness profile
+> 源码目录内必须 `pnpm install`（link 依赖不会自动补装传递依赖）并 `pnpm build`
+> （`lib/` 被 .gitignore 排除，clone 后需自行构建）。
 
-A running `dsh` is composed from ordered layers (the profile's
-`dsh.profile.bundles`, then the profile's `cordis.patch.yml`, then the
-home-level patch, then any `--patch` overlay) — a plugin package's own
-`cordis.yml` is NOT auto-discovered. To use this adapter:
+### 2. 在 DSH profile 中激活（link 源，防重装覆盖）
+
+编辑 profile 的 `package.json`（如 `~/.dsh/profiles/web/package.json`），把依赖指向本地源码目录：
+
+```json
+"dependencies": {
+  "dsh-llm-mimo": "link:C:/Users/<YOU>/.dsh/dsh-llm-mimo"
+}
+```
+
+然后在 profile 目录执行（更新 lockfile / 建立符号链接）：
 
 ```bash
-# From the profile directory (e.g. ~/.dsh/profiles/web), install the package:
-pnpm add dsh-llm-mimo
+cd ~/.dsh/profiles/web
+pnpm install --config.minimum-release-age=0
 ```
 
-Then append this block to the profile's `cordis.patch.yml`:
+### 3. 配置 `cordis.patch.yml` 激活块
+
+> dsh-llm-mimo 是**非 bundle 型插件**（package.json 无 `dsh.bundle`），不能加进
+> `dsh.profile.bundles`（会报 `declares no dsh.bundle`），只能通过 profile 的
+> `cordis.patch.yml` 的 `insert` 块注册进 LLM seam。
+
+在 profile 的 `cordis.patch.yml` 追加：
 
 ```yaml
 - insert:
@@ -53,51 +87,70 @@ Then append this block to the profile's `cordis.patch.yml`:
         apiKeyEnv: MIMO_API_KEY
         baseURL: https://api.xiaomimimo.com/v1
         enableThinking: true
+        maxTokens: 131072
+        defaultContextWindow: 1000000
+        models:
+          - id: mimo-v2.5-pro
+            name: MiMo-V2.5-Pro
+            contextWindow: 1000000
+          - id: mimo-v2.5
+            name: MiMo-V2.5
+            contextWindow: 1000000
+        streamIdleTimeoutMs: 300000
 ```
 
-In the monorepo workspace, the package sits under `packages/llm/llm-mimo` and
-is referenced by name the same way; the repo's tsconfig base replaces the
-standalone `tsconfig.json` shipped here.
+### 4. 配置 API Key（密钥，绝不提交到仓库）
 
-### Configuration
+MiMo API Key 通过**环境变量名引用**（`apiKeyEnv: MIMO_API_KEY`），插件在请求时从
+DSH 的凭据服务解析，**不会硬编码、不会写入仓库**。
 
-Set your MiMo API key:
+**方式 A：环境变量**（命令行启动 dsh 时）
 
 ```bash
-export MIMO_API_KEY="your-api-key-here"
+# Windows PowerShell
+$env:MIMO_API_KEY = "sk-你的密钥"
+dsh web
 ```
 
-Or in `.env` file:
+**方式 B：DSH credentials 文件**（推荐，持久化）
+
+在 `~/.dsh/.credentials.yaml` 中添加：
+
+```yaml
+MIMO_API_KEY: sk-你的密钥
+```
+
+**方式 C：`.env` 文件**（项目内）
 
 ```
-MIMO_API_KEY=your-api-key-here
+MIMO_API_KEY=sk-你的密钥
 ```
 
-Get your API key from [MiMo Platform](https://platform.xiaomimimo.com).
+> ⚠️ **安全提醒**：`sk-...` 密钥属于敏感信息，**永远不要**提交进 git / 写入
+> README / 粘贴到 Issue。`lib/`、`node_modules/`、`.env`、凭据文件均已被
+> `.gitignore` 排除。
 
-## Usage
+获取 API Key：[MiMo Platform](https://platform.xiaomimimo.com)
 
-### With DeepSeek Harness Web UI
+### 5. 重启生效
 
 ```bash
-# From DeepSeek Harness checkout
-pnpm dsh web
+# 重启 dsh web（用户手动执行）
+restart-dsh.ps1        # 或 dsh web
 ```
 
-Then select `mimo-official` as the provider and choose a model.
+重启后在 GUI 模型选择器中选择 **Xiaomi MiMo → MiMo-V2.5-Pro**（或 MiMo-V2.5）即可。
 
-### Programmatic usage
+## Verification
 
-```typescript
-import { Context } from '@deepseek-ai/cordis'
-import llmMimo from 'dsh-llm-mimo'
+```bash
+# 1. 配置树包含 llm-mimo
+dsh --profile web --dump-config | grep -A 3 llm-mimo
 
-const ctx = new Context()
-ctx.plugin(llmMimo, {
-  apiKeyEnv: 'MIMO_API_KEY',
-  baseURL: 'https://api.xiaomimimo.com/v1',
-  enableThinking: true,
-})
+# 2. lib 产物含核心修复
+grep -c sanitizeArguments lib/serialize.js    # 期望 >= 1
+
+# 3. GUI 测试：新建会话选 MiMo 模型发消息，应正常回复
 ```
 
 ## Configuration Options
@@ -107,7 +160,7 @@ ctx.plugin(llmMimo, {
 | `apiKeyEnv` | `string` | `MIMO_API_KEY` | Credential reference (environment-variable name) for the API key |
 | `baseURL` | `string` | `https://api.xiaomimimo.com/v1` | API endpoint base URL |
 | `enableThinking` | `boolean` | `true` | Whether thinking mode is enabled by default |
-| `maxTokens` | `number` | `256000` | Default per-request output token cap |
+| `maxTokens` | `number` | `131072` | Default per-request output token cap (MiMo hard limit) |
 | `defaultContextWindow` | `number` | `1000000` | Default context window size |
 | `models` | `MiMoCatalogModel[]` | V2.5, V2.5-Pro | Advisory model catalog |
 | `streamIdleTimeoutMs` | `number` | `300000` | Stream idle timeout (ms) |
@@ -130,26 +183,6 @@ MiMo v2.5 uses the `reasoning_content` field in SSE responses to stream thinking
 }
 ```
 
-### Harness translation
-
-The adapter translates this into harness `StreamChunk` protocol:
-
-```typescript
-// 1. Block start
-{ type: 'block-start', index: 0, blockType: 'reasoning' }
-
-// 2. Reasoning deltas
-{ type: 'reasoning-delta', index: 0, text: 'Let me think about this...' }
-
-// 3. Block end
-{ type: 'block-end', index: 0, block: { type: 'reasoning', text: '...' } }
-
-// 4. Text content (if any)
-{ type: 'block-start', index: 1, blockType: 'text' }
-{ type: 'text-delta', index: 1, text: 'The answer is...' }
-{ type: 'block-end', index: 1, block: { type: 'text', text: '...' } }
-```
-
 ### Multi-turn conversations
 
 MiMo requires `reasoning_content` to be preserved in assistant messages when
@@ -157,22 +190,12 @@ the assistant turn carried tool calls and thinking mode is enabled. On
 tool-call-free turns the field is ignored by the provider, so this adapter
 omits it there to save tokens.
 
-## API Compatibility
+### Known 400 causes (fixed in this fork)
 
-### MiMo-specific parameters
-
-- `enable_thinking` (boolean): Controls thinking mode (non-OpenAI standard, passed via `extra_body` in Python SDK)
-- `max_completion_tokens`: Used instead of `max_tokens` for output token limit
-
-### Differences from DeepSeek API
-
-| Feature | DeepSeek | MiMo |
-|---------|----------|------|
-| Thinking toggle | `thinking.type: 'enabled'` | `enable_thinking: true` |
-| Reasoning effort | `reasoning_effort: 'low'` | Not supported |
-| Stop sequences | No limit | Max 4 |
-| Temperature range | [0, 2) | [0, 1.5] |
-| Top-p range | (0, 1] | [0.01, 1] |
+- **Invalid `tool_calls.arguments` JSON**（interrupted tool call 遗留的截断参数）→ 已由
+  `sanitizeArguments` 防御性降级为 `{}`
+- **`maxTokens` 超过 131072** → 默认值已修正
+- **`prepareCall` 缺失**（dsh-llm 版本不匹配）→ 已实现
 
 ## Error Handling
 
@@ -181,10 +204,10 @@ The adapter maps MiMo HTTP error codes to harness error codes:
 | HTTP Status | Harness Code | Description |
 |-------------|-------------|-------------|
 | 401, 403 | `AUTH` | Authentication failure |
-| 400 | `INVALID_REQUEST` | Bad request (including missing `reasoning_content`) |
+| 400 | `INVALID_REQUEST` | Bad request (e.g. invalid tool args JSON, missing `reasoning_content`) |
 | 429 | `RATE_LIMIT` | Rate limit exceeded |
 | 500+ | `SERVER` | Server error |
 
 ## License
 
-MIT
+MIT — 保留原仓库 [GuanxuJi/dsh-llm-mimo](https://github.com/GuanxuJi/dsh-llm-mimo) 的许可。
